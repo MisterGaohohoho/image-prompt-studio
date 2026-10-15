@@ -32,7 +32,7 @@ agent_created: true
 ## 路径 A：生成新提示词
 
 1. 读取 `references/system-prompts.md` 中的 `SYSTEM_PROMPT` 全文，作为本次生成的系统指令严格执行。
-2. 若用户提供参考图片：**由运行时 agent 直接读图分析**——用自身多模态视觉能力打开图片文件，按 SYSTEM_PROMPT 要求的四个维度提取特征（角色特征、场景环境、画面风格、构图与镜头角度），再结合用户文字描述生成提示词。**不调用外部视觉模型 API**，分析由 agent 本身完成。
+2. 若用户提供参考图片：**由运行时 agent 直接读图分析**——用自身多模态视觉能力打开图片文件，按 SYSTEM_PROMPT 要求的四个维度提取特征（角色特征、场景环境、画面风格、构图与镜头角度），再结合用户文字描述生成提示词。**不调用外部视觉模型 API**，分析由 agent 本身完成。**记下参考图的文件路径**：后续路径 C 出图时必须把它作为风格参考传回（见路径 C 第 2 步）。
 3. 用户无参考图时，直接按其自然语言描述生成。
 4. 字段填写规范与各字段写法要领见 `references/prompt-schema.md`；可从 `references/options-library.md` 的词库中选用或组合高质量措辞（词库是素材不是枷锁，按画面需要自由发挥）。
 5. 输出前用校验脚本确认结构无误，再把 JSON 交付用户（保存为 `.json` 文件或直接展示）。
@@ -52,17 +52,23 @@ agent_created: true
 提示词 JSON 就绪后，通过 apiz-cli 出图。**同一份 JSON 同时兼容 Nano Banana 与 GPT-Image 两个模型家族**，按用户偏好或画面需求选择路线。
 
 1. 组装 prompt：把 JSON 原文（`json.dumps(data, ensure_ascii=False, indent=2)`）作为 prompt 文本；用户有额外要求时，以 `"\n\n特别要求：<要求>"` 形式追加在 JSON 之后。
-2. 选择模型（参数细节与完整模型表见 `references/image-generation.md`）：
+2. **带参考图（硬性规则）**：只要本次提示词是从参考图分析/修改得来的，出图时**必须**把那张原图一并作为风格参考传入——分析完就把原图丢掉是实测 bug，画风还原度会大幅下降。流程：`apiz upload "<本地原图>" --json` 取 `public_url`，再按模型传入：
+   - **GPT-Image 路线（默认）**：`--params '{"quality":"low","reference_image_urls":["<public_url>"]}'`（1-16 张；参数名是 `reference_image_urls`，`image_url`/`image_urls` 均报 400）。
+   - **Nano Banana 路线**：`--params '{"image_urls":["<public_url>"]}'`（最多 14 张，传入即进入改图模式）。
+   - 无参考图的纯文生图才可省略。
+3. 选择模型（参数细节与完整模型表见 `references/image-generation.md`）：
    - **GPT-Image 路线（默认）**：`apiz/gpt-image-2.5-flare`，质量默认 `low`（10 积分/张，约 0.1 元）。
    - **Nano Banana 路线**：`service-inference/gemini-nano-banana-2.1`，文生图与参考图编辑同一端点，支持最多 14 张参考图。
-3. 执行（标准命令）：
+4. 执行（带参考图的标准命令）：
    ```bash
    apiz generate "$(cat prompt.json)" --model apiz/gpt-image-2.5-flare \
-     --aspect-ratio 3:4 --params '{"quality":"low"}' --wait --json
+     --aspect-ratio 1:1 \
+     --params '{"quality":"low","reference_image_urls":["<public_url>"]}' \
+     --wait --json
    ```
-   `--aspect-ratio` 参照原图或用户要求（竖构图 3:4 / 横构图 16:9 / 方形 1:1 等）；生成耗时数分钟，`--wait` 会阻塞至完成，超时风险高的场合改用后台运行。
-4. 从返回 JSON 的 `result.images[0].url` 下载图片（`curl -sL -o out.jpg <url>`），核验尺寸与格式后向用户展示成片及所用提示词。
-5. 出图前如余额不明，先 `apiz account balance` 确认；积分不足时所有模型返回 HTTP 429。
+   `--aspect-ratio` 参照原图或用户要求（竖构图 3:4 / 横构图 16:9 / 方形 1:1 等）；生成耗时 2-9 分钟，`--wait` 会阻塞至完成，超时风险高的场合改用后台运行。
+5. 从返回 JSON 的 `result.images[0].url` 下载图片（`curl -sL -o out.jpg <url>`），核验尺寸与格式后向用户展示成片及所用提示词。
+6. 出图前如余额不明，先 `apiz account balance` 确认；积分不足时所有模型返回 HTTP 429。
 
 ## 预设与范例
 

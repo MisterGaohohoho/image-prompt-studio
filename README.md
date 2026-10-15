@@ -158,6 +158,45 @@ apiz generate "$(cat prompt-modified.json)" --model service-inference/gemini-nan
 
 **结论**：只改了主体字段，两模型都仍然输出**同一套夸张讽刺漫画风**（粗黑描边 + 平涂 + 纯白抠图式背景 + 方形构图），坐骑顺利从驴马换成大象、人物从狂笑武将换成羽扇纶巾的诸葛亮——**「改主体而不动风格」正是路径 B 的价值：系列作品能靠同一份 JSON 骨架不断换角色，画风不漂移。**（GPT-Image 还自发把战旗写上了「蜀」字，属模型的理解加成，非 JSON 指定。）
 
+### 第 4 步 · 补测修复（2026-10-15）：出图必须带回原图作风格参考
+
+> **Bug**：上面第 3 步的出图命令**没有把参考图传回去**——分析完就把原图丢了，模型只能靠文字描述猜画风。正确做法：提示词既然源自参考图，出图就必须把原图一并传入。本条已固化为路径 C 的硬性规则。
+
+修复后的完整命令（本地原图先 `apiz upload` 转 URL，再按模型传参）：
+
+```bash
+# 1. 本地原图 → apiz CDN URL
+apiz upload "E:/三国seedance/_3_LLHAN_来自小红书网页版.jpg" --json
+#    → { "public_url": "https://cdn-hk.51sux.com/storage/cli-uploads/..." }
+
+# 2. GPT-Image 路线：参数名是 reference_image_urls（1-16 张；image_url / image_urls 均报 400）
+apiz generate "$(cat prompt-modified.json)" --model apiz/gpt-image-2.5-flare \
+  --aspect-ratio 1:1 \
+  --params '{"quality":"low","reference_image_urls":["<public_url>"]}' --wait --json
+
+# 3. Nano Banana 路线：参数名是 image_urls（传入即进入改图模式）
+apiz generate "$(cat prompt-modified.json)" --model fal-ai/nano-banana-pro \
+  --aspect-ratio 1:1 --params '{"image_urls":["<public_url>"]}' --wait --json
+```
+
+**同一份 JSON，无参考图 vs 带参考图对比**：
+
+| 无参考图（第 3 步，有缺陷） | 带参考图（修复后） |
+| :---: | :---: |
+| ![无参考图 · flare](assets/examples/04-modified-gpt-image-flare.jpg) | ![带参考图 · flare](assets/examples/06-modified-flare-with-ref.jpg) |
+| ![无参考图 · nano-banana](assets/examples/05-modified-nano-banana.jpg) | ![带参考图 · nano-banana-pro](assets/examples/07-modified-nano-banana-with-ref.jpg) |
+| 靠文字猜画风：羽扇/太极纹/流苏鞍毯等细节易走样 | 画风与原图高度一致：坐骑继承原图同款**滑稽圆凸眼**、绿金流苏鞍毯、撕裂红战旗、粗描边平涂线条 |
+
+实测数据（2026-10-15）：
+
+| 路线 | 模型 | 耗时 | 消耗 | 结果 |
+|---|---|---|---|---|
+| GPT-Image | `apiz/gpt-image-2.5-flare` + `reference_image_urls` | 1m42s | 10 积分 | ✅ 1024×1024 |
+| Nano Banana 主通道 | `service-inference/gemini-nano-banana-2.1` + `image_urls` | — | — | ❌ 上游 502 ×2（Gemini 上游故障，`apiz tasks get <task_id>` 可查错误） |
+| Nano Banana 备选 | `fal-ai/nano-banana-pro` + `image_urls` | 3m01s | 60 积分 | ✅ 1024×1024 |
+
+**结论**：带参考图后，两模型的画风还原度都显著提升——最直观的证据是大象继承了原图驴马的「圆凸滑稽眼」，这种非文字可精确描述的特征只有看得到原图才能画出来。**分析过的参考图 ≠ 用完即弃，出图时必须传回。**
+
 ---
 
 ## 使用方式
@@ -201,10 +240,11 @@ image-prompt-studio/
 │   └── image-generation.md           # apiz-cli 生图操作手册
 └── assets/
     ├── presets/                      # 9 套预设范例
-    └── examples/                     # 本 README 两则实测的图文素材
+    └── examples/                     # 本 README 实测的图文素材
         ├── 01-reference.jpg          #   参考图（骑驴武将）
         ├── 02/03-*.jpg               #   示例 1 双模型出图
-        ├── 04/05-*.jpg               #   示例 2 修改稿双模型出图
+        ├── 04/05-*.jpg               #   示例 2 修改稿出图（无参考图，有缺陷的旧版）
+        ├── 06/07-*-with-ref.jpg      #   示例 2 第 4 步带参考图重测（修复后）
         ├── prompt.json               #   示例 1 生成的提示词
         └── prompt-modified.json      #   示例 2 最小化修改后的提示词
 ```
